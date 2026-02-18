@@ -250,7 +250,7 @@ impl App for ObamifyApp {
                 rs.queue
                     .write_buffer(&self.seed_buf, 0, bytemuck::cast_slice(&self.seeds));
                 // Update seed texture for WebGL compatibility
-                self.update_seed_texture_data(&rs.queue, &self.seeds);
+                self.update_seed_texture_data(&rs.queue);
             }
         }
 

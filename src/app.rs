@@ -151,6 +151,9 @@ pub struct ObamifyApp {
     jfa_bg_a_to_b: wgpu::BindGroup,
     jfa_bg_b_to_a: wgpu::BindGroup,
     shade_bg: wgpu::BindGroup,
+    // Pre-allocated buffer for seed texture updates (avoids per-frame allocation)
+    seed_tex_data: Vec<f32>,
+
     preview_image: Option<image::ImageBuffer<image::Rgb<u8>, Vec<u8>>>,
     #[cfg(not(target_arch = "wasm32"))]
     stroke_count: u32,
@@ -806,6 +809,7 @@ impl ObamifyApp {
             worker: None,
             #[cfg(target_arch = "wasm32")]
             inbox: Vec::new(),
+            seed_tex_data: Vec::new(),
             current_filter_mode: wgpu::FilterMode::Linear,
 
             reverse: false,
@@ -1059,16 +1063,19 @@ impl ObamifyApp {
         (tex, view)
     }
 
-    fn update_seed_texture_data(&self, queue: &wgpu::Queue, seeds: &[SeedPos]) {
+    fn update_seed_texture_data(&mut self, queue: &wgpu::Queue) {
         // Update seed texture data without recreating the texture
+        // Reuses pre-allocated buffer to avoid per-frame allocation
         const TEX_WIDTH: u32 = 1024;
         let tex_height = self.seed_count.div_ceil(TEX_WIDTH);
+        let required_len = (TEX_WIDTH * tex_height * 2) as usize;
 
-        let mut data = vec![0.0f32; (TEX_WIDTH * tex_height * 2) as usize];
-        for (i, seed) in seeds.iter().enumerate() {
-            data[i * 2] = seed.xy[0];
-            data[i * 2 + 1] = seed.xy[1];
-        }
+        self.seed_tex_data.resize(required_len, 0.0);
+
+        // Bulk copy via bytemuck instead of per-element loop
+        // SeedPos is #[repr(C)] Pod with xy: [f32; 2], so cast_slice gives &[f32] directly
+        let seed_floats: &[f32] = bytemuck::cast_slice(&self.seeds);
+        self.seed_tex_data[..seed_floats.len()].copy_from_slice(seed_floats);
 
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
@@ -1077,7 +1084,7 @@ impl ObamifyApp {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            bytemuck::cast_slice(&data),
+            bytemuck::cast_slice(&self.seed_tex_data),
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(TEX_WIDTH * 8), // 2 floats * 4 bytes per pixel

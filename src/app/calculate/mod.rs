@@ -32,11 +32,15 @@ fn heuristic(
     color_weight: i64,
     spatial_weight: i64,
 ) -> i64 {
-    let spatial = (apos.0 as i64 - bpos.0 as i64).pow(2) + (apos.1 as i64 - bpos.1 as i64).pow(2);
-    let color = (a.0 as i64 - b.0 as i64).pow(2)
-        + (a.1 as i64 - b.1 as i64).pow(2)
-        + (a.2 as i64 - b.2 as i64).pow(2);
-    color * color_weight + (spatial * spatial_weight).pow(2)
+    let dx = apos.0 as i64 - bpos.0 as i64;
+    let dy = apos.1 as i64 - bpos.1 as i64;
+    let spatial = dx * dx + dy * dy;
+    let dr = a.0 as i64 - b.0 as i64;
+    let dg = a.1 as i64 - b.1 as i64;
+    let db = a.2 as i64 - b.2 as i64;
+    let color = dr * dr + dg * dg + db * db;
+    let sw = spatial * spatial_weight;
+    color * color_weight + sw * sw
 }
 
 struct ImgDiffWeights<'a> {
@@ -502,5 +506,66 @@ pub fn process<S: ProgressSink>(
     match settings.algorithm {
         Algorithm::Optimal => process_optimal(unprocessed, settings, tx),
         Algorithm::Genetic => process_genetic(unprocessed, settings, tx),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_heuristic_identical() {
+        let h = heuristic((0, 0), (0, 0), (128, 128, 128), (128, 128, 128), 255, 13);
+        assert_eq!(h, 0, "Identical positions and colors should give 0");
+    }
+
+    #[test]
+    fn test_heuristic_symmetric() {
+        let h1 = heuristic((10, 20), (30, 40), (100, 150, 200), (50, 100, 150), 255, 13);
+        let h2 = heuristic((30, 40), (10, 20), (50, 100, 150), (100, 150, 200), 255, 13);
+        assert_eq!(h1, h2, "Heuristic should be symmetric");
+    }
+
+    #[test]
+    fn test_heuristic_color_only() {
+        // Same position, different color
+        let h = heuristic((5, 5), (5, 5), (0, 0, 0), (255, 255, 255), 1, 0);
+        let expected_color = (255i64 * 255 + 255 * 255 + 255 * 255) * 1;
+        assert_eq!(h, expected_color, "Color-only heuristic");
+    }
+
+    #[test]
+    fn test_heuristic_spatial_only() {
+        // Same color, different position, color_weight=0
+        let h = heuristic((0, 0), (10, 10), (128, 128, 128), (128, 128, 128), 0, 1);
+        let spatial = (0i64 - 10).pow(2) + (0i64 - 10).pow(2); // 200
+        let expected = (spatial * 1).pow(2);
+        assert_eq!(h, expected, "Spatial-only heuristic");
+    }
+
+    #[test]
+    fn test_heuristic_increases_with_distance() {
+        let near = heuristic((0, 0), (1, 1), (128, 128, 128), (128, 128, 128), 0, 1);
+        let far = heuristic((0, 0), (10, 10), (128, 128, 128), (128, 128, 128), 0, 1);
+        assert!(near < far, "Farther positions should have higher heuristic");
+    }
+
+    #[test]
+    fn test_make_new_img() {
+        let source = vec![(255, 0, 0), (0, 255, 0), (0, 0, 255), (128, 128, 128)];
+        let assignments = vec![2, 0, 3, 1];
+        let result = make_new_img(&source, &assignments, 2);
+        assert_eq!(
+            result,
+            vec![0, 0, 255, 255, 0, 0, 128, 128, 128, 0, 255, 0]
+        );
+    }
+
+    #[test]
+    fn test_make_new_img_identity() {
+        let source = vec![(10, 20, 30), (40, 50, 60), (70, 80, 90), (100, 110, 120)];
+        let assignments = vec![0, 1, 2, 3]; // identity
+        let result = make_new_img(&source, &assignments, 2);
+        assert_eq!(result, vec![10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]);
     }
 }
